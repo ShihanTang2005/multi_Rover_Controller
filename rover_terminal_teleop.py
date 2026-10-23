@@ -56,7 +56,7 @@ def positive(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--topics", nargs="+", default=[
-        "/roverpi2/cmd_vel", "/roverpi3/cmd_vel"])
+        "/roverpi1/cmd_vel", "/roverpi2/cmd_vel", "/roverpi3/cmd_vel"])
     parser.add_argument("--speed", type=positive, default=0.40, help="linear speed in m/s")
     parser.add_argument("--turn", type=positive, default=0.80, help="angular speed in rad/s")
     parser.add_argument("--key-timeout", type=positive, default=0.25,
