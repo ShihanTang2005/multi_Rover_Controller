@@ -61,6 +61,9 @@ def main():
     parser.add_argument("--turn", type=positive, default=0.80, help="angular speed in rad/s")
     parser.add_argument("--key-timeout", type=positive, default=0.25,
                         help="seconds since last motion key before zero command")
+    parser.add_argument("--sync", action="store_true",
+                        help="publish only to the selected rover; rovers running the bridge "
+                             "with sync_enabled re-broadcast its commands and the rest follow")
     args = parser.parse_args()
     if not sys.stdin.isatty():
         parser.error("requires an interactive terminal: use docker exec -it")
@@ -87,11 +90,11 @@ def main():
         nonlocal running
         running = False
 
-    def publish(values):
-        for publisher, (v, w) in zip(publishers, values):
+    def publish(values, targets=None):
+        for i in range(len(publishers)) if targets is None else targets:
             msg = Twist()
-            msg.linear.x, msg.angular.z = float(v), float(w)
-            publisher.publish(msg)
+            msg.linear.x, msg.angular.z = float(values[i][0]), float(values[i][1])
+            publishers[i].publish(msg)
 
     try:
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -104,7 +107,10 @@ def main():
         for i, topic in enumerate(args.topics, 1):
             print("%d: %s" % (i, topic))
         print("ROS_DOMAIN_ID=%s" % os.environ.get("ROS_DOMAIN_ID", "0 (unset)"))
+        if args.sync:
+            print("SYNC: only the selected rover is commanded; the others follow its relay.")
         counts = [0] * len(publishers)
+        last_selected = motion.selected
         next_discovery = next_status = 0.0
         while running and rclpy.ok():
             start = time.monotonic()
@@ -134,10 +140,22 @@ def main():
                 motion.stop()
             values = [(0.0, 0.0)] * len(publishers)
             values[motion.selected] = motion.value(start)
-            publish(values)
+            if args.sync:
+                # Non-selected rovers must get no direct commands, or they would
+                # not follow. On a switch, send the old leader one zero so it
+                # stops now instead of after its cmd_timeout.
+                targets = [motion.selected]
+                if last_selected != motion.selected:
+                    targets.append(last_selected)
+                    last_selected = motion.selected
+                publish(values, targets)
+            else:
+                publish(values)
             if start >= next_status:
                 v, w = values[motion.selected]
                 status = "READY" if counts[motion.selected] == 1 else "BLOCKED"
+                if args.sync:
+                    status += " SYNC"
                 sys.stdout.write("\r%s | %s | subscribers=%d | v=%+.2f w=%+.2f       " %
                                  (args.topics[motion.selected], status,
                                   counts[motion.selected], v, w))
